@@ -19,7 +19,7 @@ class UserSpicePasskeyCredentialRepository
         $this->db = $db;
     }
 
-    public function saveCredentialSource(PublicKeyCredentialSource $credentialSource): void
+    public function saveCredentialSource(CredentialRecord $credentialSource): void
     {
         // Accessing public properties instead of getters
         $transportsJson = json_encode($credentialSource->transports);
