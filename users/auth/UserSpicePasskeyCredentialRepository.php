@@ -57,7 +57,7 @@ class UserSpicePasskeyCredentialRepository
         }
     }
 
-    public function findOneByCredentialId(string $publicKeyCredentialId): ?PublicKeyCredentialSource
+    public function findOneByCredentialId(string $publicKeyCredentialId): ?CredentialRecord
     {
         $row = $this->db->query(
             "SELECT * FROM us_passkeys WHERE credential_id = ?",
@@ -86,7 +86,7 @@ class UserSpicePasskeyCredentialRepository
         return $credentials;
     }
 
-    private function rowToCredentialSource(object $row): PublicKeyCredentialSource
+    private function rowToCredentialSource(object $row): CredentialRecord
     {
         $transports = json_decode($row->transports ?? '[]', true);
         $aaguidString = is_string($row->aaguid) ? $row->aaguid : '';
@@ -95,7 +95,7 @@ class UserSpicePasskeyCredentialRepository
         $aaguid = Uuid::fromString($aaguidString); 
         $trustPath = $this->deserializeTrustPath($row->trust_path ?? '');
 
-        return new PublicKeyCredentialSource(
+        return new CredentialRecord(
             $row->credential_id,          // publicKeyCredentialId
             'public-key',                 // type
             $transports,                  // transports
