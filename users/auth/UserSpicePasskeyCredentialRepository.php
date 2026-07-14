@@ -3,7 +3,7 @@ declare(strict_types=1);
 /**
  * @see UserSpicePasskeyCredentialRepository
  */
-use Webauthn\PublicKeyCredentialSource;
+use Webauthn\CredentialRecord;
 use Webauthn\PublicKeyCredentialUserEntity;
 use Webauthn\TrustPath\TrustPath;
 use Webauthn\TrustPath\EmptyTrustPath;
@@ -19,7 +19,7 @@ class UserSpicePasskeyCredentialRepository
         $this->db = $db;
     }
 
-    public function saveCredentialSource(PublicKeyCredentialSource $credentialSource): void
+    public function saveCredentialSource(CredentialRecord $credentialSource): void
     {
         // Accessing public properties instead of getters
         $transportsJson = json_encode($credentialSource->transports);
