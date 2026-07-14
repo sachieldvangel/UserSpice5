@@ -21,7 +21,7 @@ use Webauthn\AuthenticatorAttestationResponse;
 use Webauthn\AuthenticatorAttestationResponseValidator;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\AuthenticatorAssertionResponseValidator;
-use Webauthn\PublicKeyCredentialSource;
+use Webauthn\CredentialRecord;
 use Webauthn\PublicKeyCredential;
 use Webauthn\Denormalizer\WebauthnSerializerFactory;
 use Cose\Algorithms;
@@ -376,7 +376,7 @@ class PasskeyHandler
         $existingCredentials = $this->userSpicePasskeyCredentialRepository->findAllForUserEntity($userEntity);
 
         // Enhanced excludeCredentials with device-specific transport hints
-        $excludeCredentials = array_map(function (PublicKeyCredentialSource $credential) use ($deviceInfo) {
+        $excludeCredentials = array_map(function (CredentialRecord $credential) use ($deviceInfo) {
             $descriptor = $credential->getPublicKeyCredentialDescriptor();
 
             $transports = ['usb', 'nfc', 'ble', 'internal'];
