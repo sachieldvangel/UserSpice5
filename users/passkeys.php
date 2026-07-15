@@ -1,6 +1,24 @@
 <?php
-$noMaintenanceRedirect = true; 
+$noMaintenanceRedirect = true;
 require_once '../users/init.php';
+
+// Step-up gate for the authenticated passkey-management branch. Guests fall
+// through (forceReauth no-ops when not logged in) so anonymous passkey LOGIN
+// still works. A cloaked admin skips reauth (already authenticated to cloak)
+// but may only manage the impersonated user's passkeys if the site opted in
+// via usersc/includes/custom_cloak_policy.php. Everyone else must re-auth.
+// The parser (auth/parsers/passkey_parser.php) enforces the same rule on the
+// store/register actions, since those bypass this page entirely.
+if (isset($user) && $user->isLoggedIn()) {
+    if (isCloaked()) {
+        if (!cloakCanManage('passkeys')) {
+            usError("You cannot manage another user's passkeys while cloaked.");
+            Redirect::to($us_url_root . 'users/account.php');
+        }
+    } else {
+        forceReauth('', 'passkey_management');
+    }
+}
 
 require_once $abs_us_root.$us_url_root.'users/includes/template/prep.php';
 if(isset($user) && $user->isLoggedIn() && Input::get('passkeySuccess') == 'true'){

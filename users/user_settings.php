@@ -28,8 +28,13 @@ if (!securePage(Server::get('PHP_SELF'))) {
 // Step-up authentication: re-verify the user's identity before account
 // settings (email, password, etc.) can be viewed or changed. This is a no-op
 // while inside the reauth grace window, so a user editing their settings is
-// only prompted once per window — not on every save.
-forceReauth('', 'user_settings');
+// only prompted once per window — not on every save. A cloaked admin skips
+// reauth (already authenticated to start the cloak) — same pattern as
+// passkeys.php / totp_management.php; the cloak policy explicitly leaves
+// password resets available to cloaked admins.
+if (!isCloaked()) {
+  forceReauth('', 'user_settings');
+}
 
 $hooks = getMyHooks();
 includeHook($hooks, 'pre');

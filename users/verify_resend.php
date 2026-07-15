@@ -56,12 +56,12 @@ if (Input::exists('post')) {
     }
 
     if ($validation->passed()) {
-        if ($fuser->exists()) {
-          if ($check > 0) {
-            $string = lang("VER_SUC");
-            usSuccess($string);
-            Redirect::to($us_url_root."users/login.php");
-          }
+        // Only a real, still-unverified account gets a fresh verification email.
+        // Every other case (no such account, or already verified) must return the
+        // IDENTICAL response so this endpoint can't be used to enumerate accounts
+        // or their verification status. Mirrors the generic pattern in
+        // forgot_password.php.
+        if ($fuser->exists() && $check == 0) {
           $vericode = randomstring(15);
           $vericode_expiry = date("Y-m-d H:i:s", strtotime("+$settings->join_vericode_expiry hours"));
           $db->update('users', $fuser->data()->id, ['vericode' => hashVericode($vericode), 'vericode_expiry' => $vericode_expiry]);
@@ -83,8 +83,13 @@ if (Input::exists('post')) {
               $errors[] = lang("ERR_EMAIL");
           }
         } else {
+            // Account doesn't exist, or is already verified: perform the same visible
+            // work and show the identical generic success card without disclosing
+            // which. sleep() normalizes timing against the real-send path above.
+            sleep(2);
+            logger("", "Email Verification", "Verification resend requested for " . $email);
             handleAuthFailure('email_verification', null, $email);
-            $errors[] = lang("ERR_EM_DB");
+            $email_sent = true;
         }
     } else {
         $errors = $validation->errors();

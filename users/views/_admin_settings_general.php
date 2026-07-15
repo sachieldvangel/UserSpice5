@@ -467,9 +467,9 @@ if (!$totpDisabled) {
 
           <!-- ReAuth (step-up authentication) grace window -->
           <div class="form-group">
-            <label>ReAuth Grace Window (minutes) <a tabindex="-1" data-trigger="focus" data-bs-trigger="focus" data-placement="top" class="btn btn-link text-info px-0" title="How long a step-up re-authentication (forceReauth) stays valid before the user must confirm their identity again. Used by sensitive actions such as editing account settings. Set to 0 to require re-authentication every time."><i class="fa fa-question-circle offset-circle"></i></a></label>
+            <label>ReAuth Grace Window (minutes) <a tabindex="-1" data-trigger="focus" data-bs-trigger="focus" data-placement="top" class="btn btn-link text-info px-0" title="How long a step-up re-authentication (forceReauth) stays valid before the user must confirm their identity again. Used by sensitive actions such as editing account settings. Minimum 1 minute — if set to 0 or left blank, the default of 15 minutes is used."><i class="fa fa-question-circle offset-circle"></i></a></label>
             <div class="input-group">
-              <input type="number" step="1" min="0" class="form-control ajxnum" data-desc="ReAuth Grace Window" name="reauth_timeout" id="reauth_timeout" value="<?= $settings->reauth_timeout ?? 15; ?>">
+              <input type="number" step="1" min="1" class="form-control ajxnum" data-desc="ReAuth Grace Window" name="reauth_timeout" id="reauth_timeout" value="<?= $settings->reauth_timeout ?? 15; ?>">
               <span class="input-group-addon input-group-text">minutes</span>
             </div>
             <small class="text-body-secondary">Applies to passwords, TOTP, passkeys, email codes, and social re-auth.</small>

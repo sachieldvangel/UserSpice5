@@ -212,10 +212,13 @@ public function handleAuthorizationRequest() {
             return;
         }
 
-        // Retrieve redirect_uri from the database based on client_id
-        $clientData = $this->db->query("SELECT redirect_uri FROM us_oauth_server_clients WHERE client_id = ?", [$clientId])->first();
-        $redirectUri = $clientData->redirect_uri;
-
+        // No redirect_uri lookup is needed here: at the token stage the grant is
+        // authenticated by client_secret (verifyClientCredentials) and the auth
+        // code, which validateAuthCode() binds to this client_id. redirect_uri was
+        // already validated against the registered value during the authorize step
+        // (handleAuthorizationRequest). The previous lookup read the column before
+        // confirming the client existed, which emitted a warning on unknown
+        // client_ids; it was unused, so it is removed.
         if (!$this->verifyClientCredentials($clientId, $clientSecret)) {
             logger(1, "OAuth Server", "Invalid client credentials: $clientId");
             $rateLimit->record('login_attempt', $rateLimitIdentifiers, false, ['type' => 'oauth_invalid_client']);

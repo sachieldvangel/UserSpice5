@@ -666,27 +666,7 @@ if (!function_exists('requestCheck')) {
 if (!function_exists('adminNotifications')) {
   function adminNotifications($type, $threads, $user_id)
   {
-    global $db;
-
-    $i = 0;
-    foreach ($threads as $id) {
-      $id = (int) $id;
-      if ($type == 'read') {
-        $db->query("UPDATE notifications SET is_read = 1 WHERE id = ?", [$id]);
-        // logger($user_id, 'Notifications - Admin', "Marked Notification ID #$id read.");
-      }
-      if ($type == 'unread') {
-        $db->query("UPDATE notifications SET is_read = 0,is_archived=0 WHERE id = ?", [$id]);
-        // logger($user_id, 'Notifications - Admin', "Marked Notification ID #$id unread.");
-      }
-      if ($type == 'delete') {
-        $db->query("UPDATE notifications SET is_archived = 1 WHERE id = ?", [$id]);
-        // logger($user_id, 'Notifications - Admin', "Deleted Notification ID #$id.");
-      }
-      ++$i;
-    }
-
-    return $i;
+    return 0; //deprecated but we do not want to break plugins
   }
 }
 
@@ -1573,6 +1553,34 @@ if (!function_exists('cloakFrom')) {
       return (int) $_SESSION['cloak_from'];
     }
     return null;
+  }
+}
+
+// May a *cloaked* admin manage the impersonated user's enrolled credentials?
+// Enrolling a passkey/TOTP factor is as sensitive as a password change, which
+// for a normal user sits behind forceReauth(). A cloaked admin already
+// authenticated to start the cloak, so instead of re-auth we consult a site
+// policy: usersc/includes/custom_cloak_policy.php. Secure-by-default — a
+// missing file or unset var means DENY. $what is 'passkeys' or 'totp'. This
+// only governs the cloaked case; non-cloaked users are gated by forceReauth().
+if (!function_exists('cloakCanManage')) {
+  function cloakCanManage($what)
+  {
+    global $abs_us_root, $us_url_root;
+    // Defaults are local to this function scope; the policy file (if present)
+    // overrides them by re-assigning the same variables. Using plain variables
+    // — not constants — keeps this re-includable per request with no global
+    // namespace pollution and no "constant already defined" hazard.
+    $cloak_can_manage_passkeys = false;
+    $cloak_can_manage_totp     = false;
+    $policyFile = $abs_us_root . $us_url_root . 'usersc/includes/custom_cloak_policy.php';
+    if (is_file($policyFile)) {
+      include $policyFile;
+    }
+    if ($what === 'totp') {
+      return !empty($cloak_can_manage_totp);
+    }
+    return !empty($cloak_can_manage_passkeys);
   }
 }
 

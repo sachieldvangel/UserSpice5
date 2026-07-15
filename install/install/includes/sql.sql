@@ -315,24 +315,6 @@ CREATE TABLE `message_threads` (
 -- --------------------------------------------------------
 
 --
--- Table structure for table `notifications`
---
-
-CREATE TABLE `notifications` (
-  `id` int(11) UNSIGNED NOT NULL,
-  `user_id` int(11) NOT NULL,
-  `message` longtext NOT NULL,
-  `is_read` tinyint(4) NOT NULL,
-  `is_archived` tinyint(1) DEFAULT 0,
-  `date_created` datetime DEFAULT NULL,
-  `date_read` datetime DEFAULT NULL,
-  `last_updated` timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE current_timestamp(),
-  `class` varchar(100) DEFAULT NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
-
--- --------------------------------------------------------
-
---
 -- Table structure for table `pages`
 --
 
@@ -1284,12 +1266,6 @@ ALTER TABLE `message_threads`
   ADD PRIMARY KEY (`id`);
 
 --
--- Indexes for table `notifications`
---
-ALTER TABLE `notifications`
-  ADD PRIMARY KEY (`id`);
-
---
 -- Indexes for table `pages`
 --
 ALTER TABLE `pages`
@@ -1551,12 +1527,6 @@ ALTER TABLE `messages`
 --
 ALTER TABLE `message_threads`
   MODIFY `id` int(11) NOT NULL AUTO_INCREMENT;
-
---
--- AUTO_INCREMENT for table `notifications`
---
-ALTER TABLE `notifications`
-  MODIFY `id` int(11) UNSIGNED NOT NULL AUTO_INCREMENT;
 
 --
 -- AUTO_INCREMENT for table `pages`

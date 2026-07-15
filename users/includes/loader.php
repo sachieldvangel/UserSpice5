@@ -124,6 +124,14 @@ if ($user->isLoggedIn() && !hasPerm(2)) {
 	if (($settings->site_offline == 1) && (!in_array($user->data()->id, $master_account)) && ($currentPage != 'login.php') && ($currentPage != 'maintenance.php')) {
 		//:: force logout then redirect to maint.page
 		if (!isset($noMaintenanceRedirect) || $noMaintenanceRedirect != true) {
+			// A cloaked session is judged on the IMPERSONATED user's perms here.
+			// Logging out would destroy the admin's real session — end the cloak
+			// instead and let the next request re-evaluate as the real admin.
+			if (isCloaked()) {
+				endCloak();
+				usError("The site went into maintenance mode, so your cloak was ended.");
+				Redirect::to($us_url_root . 'users/admin.php?view=users');
+			}
 			logger($user->data()->id, "Offline", "Landed on Maintenance Page.");
 			$user->logout();
 			Redirect::to($us_url_root . 'users/maintenance.php');
@@ -144,11 +152,19 @@ if (!$user->isLoggedIn()) {
 }
 
 if ($settings->force_ssl == 1 && !isHTTPSConnection()) {
-    $host = Server::get('HTTP_HOST', '');
+    // Prefer an admin-pinned canonical host when US_CANONICAL_HOST is defined in
+    // users/init.php. On servers that forward arbitrary Host headers to PHP, the
+    // client-supplied HTTP_HOST lets an attacker steer this redirect to another
+    // origin (host-header open redirect / cache poisoning). Pinning the host
+    // closes that. Undefined (the default) keeps the original behavior of
+    // trusting the request Host, so existing installs are unaffected. The value
+    // is the authority only — host or host:port, e.g. 'example.com'.
+    $canonical = (defined('US_CANONICAL_HOST') && US_CANONICAL_HOST !== '') ? US_CANONICAL_HOST : '';
+    $host = $canonical !== '' ? $canonical : Server::get('HTTP_HOST', '');
     $uri = Server::get('REQUEST_URI', '/');
 
     if ($host !== '') {
-        Redirect::to("https://{$host}{$uri}"); 
+        Redirect::to("https://{$host}{$uri}");
     }
 }
 
@@ -161,7 +177,11 @@ if (isset($_SESSION['us_lang'])) {
 
 
 $no_pr = ["user_settings.php", "logout.php", "pw_strength_check.php"];
-if ($user->isLoggedIn() && !in_array($currentPage, $no_pr) && $user->data()->force_pr == 1) {
+// force_pr makes the USER reset their password on their own next login. A
+// cloaked admin is not that user — without the isCloaked() exemption they get
+// fenced away from account.php (the only page with the Uncloak button) and
+// can only escape by changing the user's password or logging out.
+if ($user->isLoggedIn() && !isCloaked() && !in_array($currentPage, $no_pr) && $user->data()->force_pr == 1) {
 	$resetMsg = lang("VER_PLEASE");
 	usError($resetMsg);
 	Redirect::to($us_url_root . 'users/user_settings.php');

@@ -71,6 +71,16 @@ if ($cloakConfirm) {
 //Forms posted
 if (!empty($_POST)) {
 
+  // Defense in depth: this page is reached through securePage() on admin.php, but the
+  // handlers below grant/remove permissions and edit accounts. Require admin permission
+  // (2) inline so a single mis-set 'pages' row can never expose these write actions.
+  // This is also the real server-side authz check for permission grants: addPermission()
+  // does not itself verify the operator holds the permission being granted.
+  if (!hasPerm([2], $user->data()->id)) {
+    usError(lang("GEN_NO_PERMISSIONS"));
+    Redirect::to($us_url_root . 'users/admin.php');
+  }
+
   if ($userdetails->protected == 1 && (isset($_POST['delete']) || isset($_POST['blocking']) || isset($_POST['cloak']) || isset($_POST['force_pr']))) {
     usError("You cannot perform this action on a protected profile");
     Redirect::to("admin.php?view=user&id=" . $userdetails->id);

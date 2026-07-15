@@ -215,7 +215,12 @@ if (Input::exists('get')) {
         $codeMatches = $verify->exists() && !empty($verify->data()->vericode)
             && hash_equals((string)$verify->data()->vericode, hashVericode((string)$vericode));
 
-        if ($verify->data()->email_verified == 1 && $codeMatches && $verify->data()->email_new == "") {
+        // Whether the stored vericode is still within its expiry window. Enforced on
+        // the already-verified view below so a known-but-expired code can no longer
+        // keep rendering the success card (stale-link replay).
+        $notExpired = strtotime((string)$verify->data()->vericode_expiry) - strtotime(date("Y-m-d H:i:s")) > 0;
+
+        if ($verify->data()->email_verified == 1 && $codeMatches && $notExpired && $verify->data()->email_new == "") {
             $eventhooks = getMyHooks(['page' => 'verifySuccess']);
             includeHook($eventhooks, 'body');
             ?>

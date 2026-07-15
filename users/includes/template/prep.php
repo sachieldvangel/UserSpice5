@@ -1,4 +1,18 @@
 <?php
+// $menu_override may be a menu ID or a menu_name string (see "Code Usage" in
+// the Menu Manager). Most templates gate it with is_numeric() before calling
+// new Menu(), so resolve a name to its numeric ID here — one central fix that
+// makes names work in every template without touching them. An unknown name
+// gets a visible notice and is left as-is, so the template falls back to the
+// main menu exactly as it does today.
+if (isset($menu_override) && is_string($menu_override) && $menu_override !== '' && !is_numeric($menu_override)) {
+  $menuOverrideRow = $db->query("SELECT id FROM us_menus WHERE menu_name = ?", [$menu_override])->first();
+  if ($menuOverrideRow) {
+    $menu_override = (int)$menuOverrideRow->id;
+  } else {
+    err('Menu "' . safeReturn($menu_override) . '" was not found, so the default menu was used. Check $menu_override against the Menu Manager.');
+  }
+}
 if($settings->template == "wp"){$ignoreTemplateFix = true;}else{$ignoreTemplateFix = false;}
 if(isset($template_override)){
   $template_override = basename($template_override); // strip any path components; prevents traversal in the template paths below

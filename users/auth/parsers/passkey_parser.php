@@ -64,6 +64,22 @@ function handlePasskeyError($e, $userId = null, $context = 'unknown')
     }
 }
 
+// Step-up gate for credential ENROLLMENT actions (register/store). Mirrors the
+// forceReauth()/cloak-policy gate on passkeys.php so the AJAX endpoint cannot be
+// used to bypass it. Throws (caught below, returned as JSON) when not allowed.
+function requirePasskeyStepUp()
+{
+    if (function_exists('isCloaked') && isCloaked()) {
+        if (!function_exists('cloakCanManage') || !cloakCanManage('passkeys')) {
+            throw new Exception("Passkey management is disabled for cloaked admins on this site.");
+        }
+        return;
+    }
+    if (function_exists('reauthConfirmed') && !reauthConfirmed()) {
+        throw new Exception("Re-authentication required before managing passkeys.");
+    }
+}
+
 // Initialized before the try so the catch block can always reference it,
 // even if an exception is thrown before the in-try assignment is reached.
 $userId = null;
@@ -99,7 +115,16 @@ try {
     if (isset($user) && $user->isLoggedIn()) {
         $userId = $user->data()->id;
     }
-    if (!validateRateLimit('passkey_' . $action, $userId)) {
+    // On the anonymous verify (login) path $userId is null, so the limiter can only
+    // key on IP/total. Add the claimed credential id as an extra identifier so
+    // repeated attempts against a single credential are throttled regardless of
+    // login state (the limiter always adds the client IP on its own). Recorded on
+    // the same key in the catch block below so failures actually accumulate.
+    $rateLimitExtra = [];
+    if ($action === 'verify' && isset($data['credentialId']) && $data['credentialId'] !== '') {
+        $rateLimitExtra['credential'] = $data['credentialId'];
+    }
+    if (!validateRateLimit('passkey_' . $action, $userId, null, $rateLimitExtra)) {
         throw new Exception(getRateLimitErrorMessage('passkey_' . $action));
     }
 
@@ -121,6 +146,13 @@ try {
                 }
 
                 $userId = $user->data()->id;
+
+                // Enrolling a passkey is step-up sensitive. The passkeys.php page
+                // gates this with forceReauth(), but the store action is reachable
+                // directly, so enforce the same rule here. Cloaked admins follow
+                // the cloak policy; everyone else must be inside the reauth grace
+                // window established on the management page.
+                requirePasskeyStepUp();
 
                 if (!isset($data['credentialId'], $data['clientDataJSON'], $data['attestationObject'])) {
                     throw new Exception(lang("PASSKEY_MISSING_CREDENTIAL_DATA"));
@@ -233,6 +265,10 @@ try {
 
                 $userId = $user->data()->id;
                 // logger($userId, 'PasskeyRegChallenge', 'Registration challenge requested');
+
+                // Same step-up gate as 'store' — fail early before issuing a
+                // registration challenge the caller could not complete anyway.
+                requirePasskeyStepUp();
 
                 // Check if user already has maximum passkeys
                 $existingCount = $db->query("SELECT COUNT(*) as count FROM us_passkeys WHERE user_id = ?", [$userId])->first()->count;
@@ -356,13 +392,16 @@ try {
                 break;
 
             case 'network-test':
+                // Connectivity probe. Restricted to logged-in users and
+                // deliberately omits the raw request headers — getallheaders()
+                // would expose Cookie/Authorization — and any session identifier.
+                if (!isset($user) || !$user->isLoggedIn()) {
+                    throw new Exception(lang("PASSKEY_LOGIN_REQUIRED"));
+                }
                 $networkInfo = [
                     'server_time' => date('Y-m-d H:i:s'),
                     'client_ip' => Server::get('REMOTE_ADDR', 'unknown'),
-                    'user_agent' => Server::get('HTTP_USER_AGENT', 'unknown'),
-                    'host' => Server::get('HTTP_HOST', 'unknown'),
                     'protocol' => Server::getScheme(),
-                    'headers' => getallheaders(),
                     'session_active' => session_status() === PHP_SESSION_ACTIVE
                 ];
 
@@ -383,7 +422,14 @@ try {
 } catch (Exception $e) {
     // Make sure we clear any output buffer that might contain HTML
     if (isset($action) && $action) {
-        handleAuthFailure('passkey_' . $action, $userId, null, [], [
+        // Mirror the credential keying from the pre-check so per-credential verify
+        // failures accumulate against that bucket (otherwise the check reads an
+        // empty bucket that never trips).
+        $failExtra = [];
+        if ($action === 'verify' && isset($data['credentialId']) && $data['credentialId'] !== '') {
+            $failExtra['credential'] = $data['credentialId'];
+        }
+        handleAuthFailure('passkey_' . $action, $userId, null, $failExtra, [
             'error_message' => $e->getMessage(),
             'user_agent' => Server::get('HTTP_USER_AGENT')
         ]);

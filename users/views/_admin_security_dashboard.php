@@ -1084,7 +1084,7 @@ if (file_exists($init_file_path)) {
 }
 
 // Calculate overall security score
-function calculateSecurityScore($settings, $php_status, $rpid_status, $email_configured, $headers_configured, $is_updated, $using_default_rate_limits, $server_var_init, $server_var_root, $server_var_headers, $init_has_samesite = true, $init_has_cookie_secure = true, $extra_curl_security_enabled = true, $deprecated_files_present = false)
+function calculateSecurityScore($settings, $php_status, $rpid_status, $email_configured, $headers_configured, $is_updated, $using_default_rate_limits, $server_var_init, $server_var_root, $server_var_headers, $init_has_samesite = true, $init_has_cookie_secure = true, $extra_curl_security_enabled = true, $deprecated_files_present = false, $cloak_cred_mgmt_enabled = false)
 {
     $score = 100; // Start at 100 and deduct for missing items
     $max_score = 100;
@@ -1145,6 +1145,10 @@ function calculateSecurityScore($settings, $php_status, $rpid_status, $email_con
     // usersc/includes/deprecated/ are still auto-loaded by helpers.php
     if ($deprecated_files_present) $score -= 10;
 
+    // Cloaked admins allowed to manage another user's passkeys/TOTP (5 points) -
+    // a deliberate relaxation of step-up protection, off by default.
+    if ($cloak_cred_mgmt_enabled) $score -= 5;
+
     return max($score, 0); // Don't go below 0
 }
 
@@ -1154,7 +1158,14 @@ $is_updated = version_compare($user_spice_ver, $versions->release_version ?? "",
 $deprecated_php_files     = glob($abs_us_root . $us_url_root . 'usersc/includes/deprecated/*.php') ?: [];
 $deprecated_files_present = !empty($deprecated_php_files);
 
-$security_score = calculateSecurityScore($settings, $php_status, $rpid_status, $email_configured, $headers_configured, $is_updated, $using_default_rate_limits, $server_var_init, $server_var_root, $server_var_headers, $init_has_samesite, $init_has_cookie_secure, $extra_curl_security_enabled, $deprecated_files_present);
+// Cloak credential-management policy (usersc/includes/custom_cloak_policy.php).
+// Off by default; when a site owner opts in, a cloaked admin can manage the
+// impersonated user's passkeys/TOTP. Surface it as a deliberate relaxation.
+$cloak_passkey_mgmt      = function_exists('cloakCanManage') && cloakCanManage('passkeys');
+$cloak_totp_mgmt         = function_exists('cloakCanManage') && cloakCanManage('totp');
+$cloak_cred_mgmt_enabled = $cloak_passkey_mgmt || $cloak_totp_mgmt;
+
+$security_score = calculateSecurityScore($settings, $php_status, $rpid_status, $email_configured, $headers_configured, $is_updated, $using_default_rate_limits, $server_var_init, $server_var_root, $server_var_headers, $init_has_samesite, $init_has_cookie_secure, $extra_curl_security_enabled, $deprecated_files_present, $cloak_cred_mgmt_enabled);
 $score_color = $security_score >= 75 ? 'success' : ($security_score >= 60 ? 'warning' : 'danger');
 
 // Detect updates that were skipped/overridden but never acknowledged. The
@@ -1211,6 +1222,22 @@ if (!$settings->force_ssl) {
         'link_text' => 'Enable Now',
         'link_url' => '#',
         'modal' => 'confirm-force_ssl'
+    ];
+}
+
+// Force-SSL is on but no canonical host is pinned: the HTTP->HTTPS redirect is
+// built from the request Host header, which on permissive servers enables a
+// host-header open redirect. Optional, deployment-dependent hardening -
+// informational only, no score impact.
+$canonical_host_pinned = defined('US_CANONICAL_HOST') && US_CANONICAL_HOST !== '';
+if ($settings->force_ssl == 1 && !$canonical_host_pinned) {
+    $recommendations[] = [
+        'title' => 'Pin a Canonical Host for HTTPS Redirects',
+        'text'  => 'Force HTTPS is enabled, but no canonical host is pinned, so the HTTP&rarr;HTTPS redirect is built from the request <code>Host</code> header. On servers that forward arbitrary Host headers to PHP, this can be abused to redirect visitors to another domain. To harden it, define <code>US_CANONICAL_HOST</code> in <code>users/init.php</code> &mdash; e.g. <code>define(\'US_CANONICAL_HOST\', \'example.com\');</code>. This is optional and does not affect your security score.',
+        'link_text' => 'Learn More',
+        'link_url'  => '#',
+        'level' => 'info',
+        'icon'  => 'fa-link'
     ];
 }
 
@@ -1279,6 +1306,26 @@ if ($settings->email_login == 0) {
         'modal' => 'confirm-email_login',
         'level' => 'info',
         'icon' => 'fa-envelope-open-text'
+    ];
+}
+
+// Cloaked admins allowed to manage another user's passkeys/TOTP. Off by
+// default; flagged when a site owner opts in via the usersc policy file.
+if ($cloak_cred_mgmt_enabled) {
+    if ($cloak_passkey_mgmt && $cloak_totp_mgmt) {
+        $cloak_factors = 'passkeys and two-factor (TOTP) authentication';
+    } elseif ($cloak_passkey_mgmt) {
+        $cloak_factors = 'passkeys';
+    } else {
+        $cloak_factors = 'two-factor (TOTP) authentication';
+    }
+    $recommendations[] = [
+        'title' => 'Cloaked Admins Can Manage User Credentials',
+        'text' => 'Your site allows an admin who is cloaked into another user to manage that user\'s ' . $cloak_factors . '. This is off by default because it lets an admin enrol a credential under another user\'s identity. If this is intentional, you can ignore this. To restore the secure default, set the relevant flag to <code>false</code> in <code>usersc/includes/custom_cloak_policy.php</code>.',
+        'link_text' => 'Review Policy File',
+        'link_url' => '#',
+        'level' => 'warning',
+        'icon' => 'fa-user-secret'
     ];
 }
 

@@ -21,7 +21,7 @@ use Webauthn\AuthenticatorAttestationResponse;
 use Webauthn\AuthenticatorAttestationResponseValidator;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\AuthenticatorAssertionResponseValidator;
-use Webauthn\PublicKeyCredentialSource;
+use Webauthn\CredentialRecord;
 use Webauthn\PublicKeyCredential;
 use Webauthn\Denormalizer\WebauthnSerializerFactory;
 use Cose\Algorithms;
@@ -376,7 +376,7 @@ class PasskeyHandler
         $existingCredentials = $this->userSpicePasskeyCredentialRepository->findAllForUserEntity($userEntity);
 
         // Enhanced excludeCredentials with device-specific transport hints
-        $excludeCredentials = array_map(function (PublicKeyCredentialSource $credential) use ($deviceInfo) {
+        $excludeCredentials = array_map(function (CredentialRecord $credential) use ($deviceInfo) {
             $descriptor = $credential->getPublicKeyCredentialDescriptor();
 
             $transports = ['usb', 'nfc', 'ble', 'internal'];
@@ -757,8 +757,13 @@ class PasskeyHandler
         } catch (Throwable $e) {
             // @phpstan-ignore nullCoalesce.variable ($actualUserHandleForLog is always initialised earlier in this method so the trailing ?? fallback is unreachable; the chain is kept uniform with the other handle-resolution expressions here.)
             $logUserIdForError = $expectedUserSpiceId ?? ($sessionExpectedUserHandle ?? $actualUserHandleForLog ?? 'unknown_user_auth_validate_error');
-            // logger($logUserIdForError, "PasskeyAuthFail", "Error validating passkey: " . $e->getMessage());
-            throw new Exception(lang("PASSKEY_VALIDATION_FAILED_ERROR") . " " . $e->getMessage(), 0, $e);
+            // Record the specific reason server-side only. The distinct internal messages
+            // (credential-not-in-DB vs wrong-user vs signature/counter failures) must NOT
+            // reach the client: for an anonymous caller they would act as a credential
+            // existence/ownership oracle. Collapse them to one opaque message; the real
+            // cause is preserved in the log and in the chained exception ($e) for the server.
+            logger($logUserIdForError, "PasskeyAuthFail", "Error validating passkey: " . $e->getMessage());
+            throw new Exception(lang("PASSKEY_LOGIN_FAILED"), 0, $e);
         }
     }
 
@@ -787,7 +792,9 @@ class PasskeyHandler
             'session_info' => [
                 'has_assertion_options' => isset($_SESSION['passkey_assertion_options']),
                 'has_creation_options'  => isset($_SESSION['passkey_creation_options']),
-                'session_id'            => session_id(),
+                // session_id() deliberately omitted: this diagnostic is reachable
+                // by the token-gated passkey troubleshooting UI (incl. anonymous
+                // login attempts), so it must not echo a session identifier.
             ],
             'network_analysis' => $this->analyzeNetworkConditions(),
             'recommendations'  => $this->getCrossDeviceRecommendations($deviceInfo),

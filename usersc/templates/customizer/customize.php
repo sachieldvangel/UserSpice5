@@ -2,7 +2,10 @@
 require_once "assets/template_name.php";
 require_once '../../../users/init.php';
 if (Input::get('child_theme') != "") {
-  $child_theme = Input::get('child_theme');
+  // Child theme names are restricted to [A-Za-z0-9_] (same as save_child_theme below).
+  // Sanitize here so this GET-supplied value can never traverse out of child_themes/
+  // when it is used to build a require path further down.
+  $child_theme = preg_replace('/[^a-zA-Z0-9_]/', '_', Input::get('child_theme'));
 }
 require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 
@@ -591,8 +594,19 @@ if (isset($child_theme)) {
   $customizationFile = $abs_us_root . $us_url_root . 'usersc/templates/' . $template_override . '/assets/css/customizations.php';
 }
 
-if (file_exists($customizationFile)) {
-  $customizations = require $customizationFile;
+// Defense in depth: only require a file that resolves inside child_themes/ (or the
+// default customizations file). $child_theme is already sanitized at the top, so this
+// is a belt-and-suspenders guard against any future path reaching this require.
+$resolvedCustomizationFile = realpath($customizationFile);
+$resolvedChildThemesDir = realpath($childThemesDir);
+$defaultCustomizationsFile = realpath($abs_us_root . $us_url_root . 'usersc/templates/' . $template_override . '/assets/css/customizations.php');
+$customizationFileIsSafe = $resolvedCustomizationFile !== false && (
+  ($resolvedChildThemesDir !== false && strpos($resolvedCustomizationFile, $resolvedChildThemesDir . DIRECTORY_SEPARATOR) === 0)
+  || $resolvedCustomizationFile === $defaultCustomizationsFile
+);
+
+if ($customizationFileIsSafe && is_file($resolvedCustomizationFile)) {
+  $customizations = require $resolvedCustomizationFile;
 }
 
 //this file allows you to add/remove things to the $templateConfig or $customizationFile before they are used in the customizer

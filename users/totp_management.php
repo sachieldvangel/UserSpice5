@@ -1,6 +1,27 @@
 <?php
 $noMaintenanceRedirect = true;
 require_once '../users/init.php';
+
+// Step-up gate. Enrolling/disabling TOTP is as sensitive as a password change,
+// which already sits behind forceReauth(). A cloaked admin skips reauth (already
+// authenticated to cloak) but may only manage the impersonated user's TOTP if
+// the site opted in via usersc/includes/custom_cloak_policy.php. Everyone else
+// re-authenticates. All TOTP actions post back to this page, so this single
+// gate covers enrolment, disable and backup-code regeneration. (Guests are sent
+// to login below; forceReauth no-ops for them.) Only gate when TOTP is actually
+// enabled site-wide — when it is off the page is inert (it just shows "feature
+// disabled" and redirects), so a reauth prompt there would be pure friction.
+if (isset($user) && $user->isLoggedIn() && isset($settings->totp) && $settings->totp > 0) {
+    if (isCloaked()) {
+        if (!cloakCanManage('totp')) {
+            usError("You cannot manage another user's two-factor authentication while cloaked.");
+            Redirect::to($us_url_root . 'users/account.php');
+        }
+    } else {
+        forceReauth('', 'totp_management');
+    }
+}
+
 require_once $abs_us_root . $us_url_root . 'users/includes/template/prep.php';
 //if totp active and php >= 8.2.0
 if ($settings->totp > 0 && version_compare(PHP_VERSION, '8.2.0', '>=')) {

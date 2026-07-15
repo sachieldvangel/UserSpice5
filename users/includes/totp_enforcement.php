@@ -14,6 +14,16 @@ if (count(get_included_files()) == 1) die(); // Direct access not permitted
 function handleTotpEnforcement($user, $settings, $currentPage) {
     global $abs_us_root, $us_url_root, $db;
 
+    // A cloaked admin is exempt: $user is the IMPERSONATED account here, and
+    // enforcement exists to make the account owner set up/verify TOTP — the
+    // admin already satisfied their own TOTP obligations at login. Without
+    // this, cloaking into a user who needs TOTP setup ping-pongs forever
+    // between totp_management.php (whose cloak gate bounces to account.php)
+    // and this redirect, and the Uncloak button is never reachable.
+    if (function_exists('isCloaked') && isCloaked()) {
+        return;
+    }
+
     // Custom site policy hook: allow usersc to dynamically adjust $settings->totp
     // (e.g. force required for admins via hasPerm(), disable for trusted IPs via
     // ipCheck()). Loader.php only invokes this function when $settings->totp > 0,

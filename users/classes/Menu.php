@@ -24,6 +24,8 @@ class Menu {
     $q = $this->db->query("SELECT * FROM us_menus WHERE $col = ?",[$id_or_name]); // nosemgrep: userspice-raw-query-concat - $col is hardcoded to 'id' or 'menu_name', value is parameterized
     $c = $q->count();
     if($c < 1){
+      // Escaped in case a plugin/page ever passes user input as the menu identifier
+      $id_or_name = safeReturn($id_or_name);
       die("Your menu $id_or_name is missing. If you have just upgraded UserSpice,
       please navigate to users/updates in your browser to create your menus.
       Otherwise, please go into your database and restore a backup or select a different menu.
