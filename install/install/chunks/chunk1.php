@@ -1,5 +1,7 @@
 ),
 'remember'        => array(
+  // If an env file holding your encryption key exists, its filename follows cookie_name --
+  // define ENV_PATH before changing this or the key will be orphaned.
   'cookie_name'   => 'pmqesoxiw318374csb',
   'cookie_expiry' => 604800  //One week, feel free to make it longer
 ),

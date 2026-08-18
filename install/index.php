@@ -27,11 +27,10 @@ function redirect($location = null)
 
 function randomString($len)
 {
-    $len = $len++;
     $string = "";
     $chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
     for ($i = 0; $i < $len; $i++)
-        $string .= substr($chars, rand(0, strlen($chars) - 1), 1);
+        $string .= $chars[random_int(0, strlen($chars) - 1)];
     return $string;
 }
 
@@ -346,13 +345,21 @@ if ($step != 99 && (isset($_POST['test']) || isset($_POST['submit']) || isset($_
             // half-written file if this step ever runs twice.
             $end = "',";
 
+            // Randomize cookie/session names here rather than at cleanup, so the
+            // config never sits on disk with the placeholder values.
+            $chunk1 = str_replace(
+                array("pmqesoxiw318374csb", "'session_name' => 'user'"),
+                array(randomString(20), "'session_name' => '" . randomString(20) . "'"),
+                file_get_contents("install/chunks/chunk1.php")
+            );
+
             $config = file_get_contents("install/chunks/chunk0.php")
                 . "'host'         => '" . $dbh . $end . PHP_EOL
                 . "'username'     => '" . $dbu . $end . PHP_EOL
                 . "'password'     => '" . $dbp_escaped . $end . PHP_EOL
                 . "'db'           => '" . $dbn . $end . PHP_EOL
                 . "'port'         => '" . $port . $end . PHP_EOL
-                . file_get_contents("install/chunks/chunk1.php")
+                . $chunk1
                 . '$timezone_string = \'' . $tz . "';" . PHP_EOL
                 . file_get_contents("install/chunks/chunk2.php");
 
@@ -570,13 +577,8 @@ if ($step == 3 && isset($_POST['cleanup'])) {
     // Buffer any warnings/output so headers can still be sent cleanly
     ob_start();
 
-    // Update init.php with random strings (do this first, before deleting anything)
-    $str = file_get_contents('../users/init.php');
-    if ($str !== false) {
-        $str = str_replace('pmqesoxiw318374csb', randomString(20), $str);
-        $str = str_replace("'session_name' => 'user'", "'session_name' => '" . randomString(20) . "'", $str);
-        file_put_contents('../users/init.php', $str);
-    }
+    // Cookie/session names were already randomized when finalize assembled the
+    // config -- nothing to rewrite in init.php here.
 
     // Delete installation files
     foreach ($files as $file) {
