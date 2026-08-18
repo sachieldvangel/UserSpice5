@@ -252,6 +252,30 @@ function brandingValue($value, $max, $default)
     return function_exists('mb_substr') ? mb_substr($value, 0, $max) : substr($value, 0, $max);
 }
 
+// Best guess at the public URL of the site root, used to seed email.verify_url.
+// The installer always lives at <site root>/install/, so the root is two segments
+// up from this script -- no need for the z_us_root.php walk init.php does.
+function guessSiteUrl()
+{
+    $https = (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off')
+        || (isset($_SERVER['SERVER_PORT']) && (int) $_SERVER['SERVER_PORT'] === 443);
+
+    // Host headers are spoofable, but this is only a prefilled suggestion the
+    // installing admin sees and can correct before it is saved.
+    $host = $_SERVER['HTTP_HOST'] ?? ($_SERVER['SERVER_NAME'] ?? 'localhost');
+    $host = preg_replace('/[^A-Za-z0-9\.\-\:\[\]]/', '', $host);
+    if ($host === '') {
+        $host = 'localhost';
+    }
+
+    $path = str_replace('\\', '/', dirname(dirname($_SERVER['PHP_SELF'] ?? '/install/index.php')));
+    if ($path === '.' || $path === '/') {
+        $path = '';
+    }
+
+    return ($https ? 'https://' : 'http://') . $host . $path . '/';
+}
+
 // Get current step
 $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
 
@@ -345,6 +369,13 @@ if ($step != 99 && (isset($_POST['test']) || isset($_POST['submit']) || isset($_
             $site_name = brandingValue($_POST['site_name'] ?? '', 100, 'UserSpice');
             $site_copyright = brandingValue($_POST['site_copyright'] ?? '', 255, $site_name);
 
+            // Every link in a UserSpice email is verify_url . 'users/whatever.php',
+            // so it has to be the site root with a trailing slash.
+            $verify_url = brandingValue($_POST['verify_url'] ?? '', 255, guessSiteUrl());
+            if (substr($verify_url, -1) !== '/') {
+                $verify_url .= '/';
+            }
+
             // Update the admin account in the database
             try {
                 // Create connection (use raw password for actual DB connection)
@@ -390,8 +421,8 @@ if ($step != 99 && (isset($_POST['test']) || isset($_POST['submit']) || isset($_
                     mysqli_stmt_execute($stmt);
                     mysqli_stmt_close($stmt);
 
-                    $stmt = mysqli_prepare($link, "UPDATE email SET website_name = ? WHERE id = 1");
-                    mysqli_stmt_bind_param($stmt, "s", $site_name);
+                    $stmt = mysqli_prepare($link, "UPDATE email SET website_name = ?, verify_url = ? WHERE id = 1");
+                    mysqli_stmt_bind_param($stmt, "ss", $site_name, $verify_url);
                     mysqli_stmt_execute($stmt);
                     mysqli_stmt_close($stmt);
 
@@ -1517,6 +1548,12 @@ if ($step == 3 && isset($_POST['cleanup'])) {
                                     <label for="site_copyright">Copyright Message</label>
                                     <input type="text" class="form-control" id="site_copyright" name="site_copyright" maxlength="255" placeholder="Leave blank to use your site name" value="<?php echo htmlspecialchars($_POST['site_copyright'] ?? ''); ?>">
                                     <small class="text-muted">Shown in the footer after &copy; <?php echo date("Y"); ?>.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="verify_url">Site URL</label>
+                                    <input type="text" class="form-control" id="verify_url" name="verify_url" maxlength="255" value="<?php echo htmlspecialchars($_POST['verify_url'] ?? guessSiteUrl()); ?>" required>
+                                    <small class="text-muted">We filled this in from the address you are on right now. Every link in the emails your site sends is built from it, so if you are behind a proxy or plan to use a different domain, correct it here.</small>
                                 </div>
 
                                 <h4 class="mb-3 mt-4">Admin Account Setup</h4>
