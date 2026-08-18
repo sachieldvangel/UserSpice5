@@ -241,6 +241,17 @@ function installIsComplete($config_file)
     return is_file($config_file) && strpos(file_get_contents($config_file), "'host'") !== false;
 }
 
+// Trim a posted branding value to the column width, falling back to $default when
+// it is blank. mbstring is not a UserSpice requirement, so only use it if present.
+function brandingValue($value, $max, $default)
+{
+    $value = trim((string) $value);
+    if ($value === '') {
+        $value = $default;
+    }
+    return function_exists('mb_substr') ? mb_substr($value, 0, $max) : substr($value, 0, $max);
+}
+
 // Get current step
 $step = isset($_GET['step']) ? intval($_GET['step']) : 1;
 
@@ -329,6 +340,11 @@ if ($step != 99 && (isset($_POST['test']) || isset($_POST['submit']) || isset($_
             $admin_fname = !empty($_POST['admin_fname']) ? $_POST['admin_fname'] : '';
             $admin_lname = !empty($_POST['admin_lname']) ? $_POST['admin_lname'] : '';
 
+            // Site branding. A blank copyright line falls back to the site name so the
+            // footer never keeps saying "UserSpice" on somebody else's site.
+            $site_name = brandingValue($_POST['site_name'] ?? '', 100, 'UserSpice');
+            $site_copyright = brandingValue($_POST['site_copyright'] ?? '', 255, $site_name);
+
             // Update the admin account in the database
             try {
                 // Create connection (use raw password for actual DB connection)
@@ -367,6 +383,18 @@ if ($step != 99 && (isset($_POST['test']) || isset($_POST['submit']) || isset($_
 
                     mysqli_stmt_execute($stmt);
                     mysqli_stmt_close($stmt);
+
+                    // Brand the install. Both tables ship seeded with "UserSpice".
+                    $stmt = mysqli_prepare($link, "UPDATE settings SET site_name = ?, copyright = ? WHERE id = 1");
+                    mysqli_stmt_bind_param($stmt, "ss", $site_name, $site_copyright);
+                    mysqli_stmt_execute($stmt);
+                    mysqli_stmt_close($stmt);
+
+                    $stmt = mysqli_prepare($link, "UPDATE email SET website_name = ? WHERE id = 1");
+                    mysqli_stmt_bind_param($stmt, "s", $site_name);
+                    mysqli_stmt_execute($stmt);
+                    mysqli_stmt_close($stmt);
+
                     mysqli_close($link);
                 }
             } catch (Exception $e) {
@@ -1476,7 +1504,22 @@ if ($step == 3 && isset($_POST['cleanup'])) {
                                 <input type="hidden" name="port" value="<?php echo htmlspecialchars($port); ?>">
                                 <input type="hidden" name="timezone" value="<?php echo htmlspecialchars($tz); ?>">
 
-                                <h4 class="mb-3">Admin Account Setup</h4>
+                                <h4 class="mb-3">Site Setup</h4>
+                                <p>Tell us what to call your site. You can change these later in the admin dashboard.</p>
+
+                                <div class="form-group">
+                                    <label for="site_name">Site Name</label>
+                                    <input type="text" class="form-control" id="site_name" name="site_name" maxlength="100" placeholder="UserSpice" value="<?php echo htmlspecialchars($_POST['site_name'] ?? ''); ?>" required>
+                                    <small class="text-muted">Used in the page title and in the emails your site sends.</small>
+                                </div>
+
+                                <div class="form-group">
+                                    <label for="site_copyright">Copyright Message</label>
+                                    <input type="text" class="form-control" id="site_copyright" name="site_copyright" maxlength="255" placeholder="Leave blank to use your site name" value="<?php echo htmlspecialchars($_POST['site_copyright'] ?? ''); ?>">
+                                    <small class="text-muted">Shown in the footer after &copy; <?php echo date("Y"); ?>.</small>
+                                </div>
+
+                                <h4 class="mb-3 mt-4">Admin Account Setup</h4>
                                 <p>Please setup your admin account.</p>
 
                                 <div class="form-group">
