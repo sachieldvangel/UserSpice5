@@ -198,7 +198,7 @@ if (!function_exists('get_gravatar')) {
   function get_gravatar($email, $s = 120, $d = 'mm', $r = 'pg', $img = false, $atts = [])
   {
     $url = 'https://www.gravatar.com/avatar/';
-    $url .= md5(strtolower(trim($email)));
+    $url .= md5(strtolower(trim($email ?? '')));
     $url .= "?s=$s&d=$d&r=$r";
     if ($img) {
       $url = '<img src="' . $url . '"';
@@ -281,7 +281,7 @@ if (!function_exists('lang')) {
         $str = $lang[$key];
         $iteration = 1;
         foreach ($markers as $marker) {
-          $str = str_replace('%m' . $iteration . '%', $marker, $str);
+          $str = str_replace('%m' . $iteration . '%', $marker ?? '', $str);
           ++$iteration;
         }
       } else {
@@ -319,7 +319,7 @@ if (!function_exists('lang')) {
             $str = $lang[$key];
             $iteration = 1;
             foreach ($markers as $marker) {
-              $str = str_replace('%m' . $iteration . '%', $marker, $str);
+              $str = str_replace('%m' . $iteration . '%', $marker ?? '', $str);
               ++$iteration;
             }
           } else {
@@ -426,6 +426,7 @@ if (!function_exists('clean')) {
   //Cleaning function
   function clean($string)
   {
+    $string = (string) ($string ?? '');
     $string = str_replace(' ', '-', $string); // Replaces all spaces with hyphens.
     $string = preg_replace('/[^A-Za-z0-9]/', '', $string); // Removes special chars.
 
@@ -439,7 +440,7 @@ if (!function_exists('encodeURIComponent')) {
   {
     $revert = ['%21' => '!', '%2A' => '*', '%27' => "'", '%28' => '(', '%29' => ')'];
 
-    return strtr(rawurlencode($str), $revert);
+    return strtr(rawurlencode($str ?? ''), $revert);
   }
 }
 
@@ -485,7 +486,15 @@ if (!function_exists('logger')) {
 if (!function_exists('echodatetime')) {
   function echodatetime($ts)
   {
+    if ($ts === null || $ts == "") {
+      return null;
+    }
+
     $ts_converted = strtotime($ts);
+    if ($ts_converted === false) {
+      return null;
+    }
+
     $difference = ceil((time() - $ts_converted) / (60 * 60 * 24));
     // if($difference==0) { $last_update = "Today, "; $last_update .= date("g:i A",$convert); }
     if ($difference >= 0 && $difference < 7) {
@@ -497,7 +506,7 @@ if (!function_exists('echodatetime')) {
       } else {
         $date = date('l g:i A', $ts_converted);
       }
-    } elseif ($difference >= 7) {
+    } else {
       $date = date('M j, Y g:i A', $ts_converted);
     }
 
@@ -872,7 +881,11 @@ if (!function_exists('username_helper')) {
   {
     global $db, $settings;
 
-    $preusername = $fname[0];
+    $fname = (string) ($fname ?? '');
+    $lname = (string) ($lname ?? '');
+    $email = (string) ($email ?? '');
+
+    $preusername = ($fname !== '') ? $fname[0] : '';
     $preusername .= $lname;
     $preusername = strtolower(clean($preusername));
     $preQ = $db->query('SELECT username FROM users WHERE username = ?', [$preusername]);
@@ -885,7 +898,7 @@ if (!function_exists('username_helper')) {
       return $preusername;
     }
     $preusername = $fname;
-    $preusername .= $lname[0];
+    $preusername .= ($lname !== '') ? $lname[0] : '';
     $preusername = strtolower(clean($preusername));
     $preQ = $db->query('SELECT username FROM users WHERE username = ?', [$preusername]);
     if (!$db->error()) {
@@ -1847,7 +1860,7 @@ function sanitizeHTML($input)
   }
 
   // Decode HTML entities first
-  $input = html_entity_decode($input, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+  $input = html_entity_decode((string) ($input ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8');
 
   // Remove all HTML tags except allowed ones
   $output = strip_tags($input, $allowed_tags);
@@ -2046,6 +2059,7 @@ if (!function_exists("fetchFolderFiles")) {
     $files = [];
     $links = [];
     $direct = [];
+    $folder = (string) ($folder ?? '');
     if (substr($folder, -1) != "/") {
       $folder = $folder . "/";
     }
@@ -2087,9 +2101,11 @@ if (!function_exists("fetchFolderFiles")) {
 
 function offsetDate($number, $datestring = "", $unit = "days")
 {
-  if ($datestring == "") {
+  if ($datestring === null || $datestring == "") {
     $datestring = date("Y-m-d");
   }
+  $number = (string) ($number ?? '');
+  $unit = (string) ($unit ?? 'days');
   $first = substr($number, 0, 1);
   if ($first != "+" && $first != "-") {
     $symbol = "+ ";
@@ -2127,6 +2143,7 @@ if (!function_exists("userSpicePasswordStrength")) {
   {
     global $pw_settings, $db;
 
+    $password = (string) ($password ?? '');
 
     if (!isset($pw_settings->min_length)) {
       $pw_settings = $db->query("SELECT * FROM us_password_strength")->first();
@@ -2191,6 +2208,8 @@ if (!function_exists("userSpicePasswordStrength")) {
 function userSpicePasswordScore($password)
 {
   global $pw_settings, $db;
+
+  $password = (string) ($password ?? '');
 
   if (!isset($pw_settings->min_length)) {
     $pw_settings = $db->query("SELECT * FROM us_password_strength")->first();
@@ -2422,9 +2441,9 @@ function safeJsonEncodeForJs($value): string
  *
  * @psalm-taint-escape ssrf — caller must ensure the curl target is trusted
  */
-function safeCurl(string $value): string
+function safeCurl(?string $value): string
 {
-  return $value;
+  return $value ?? "";
 }
 
 /**
@@ -2433,9 +2452,9 @@ function safeCurl(string $value): string
  * @psalm-taint-escape html
  * @psalm-taint-escape text — caller must ensure content is from a trusted source
  */
-function trustedHtml(string $html): string
+function trustedHtml(?string $html): string
 {
-  return $html;
+  return $html ?? "";
 }
 
 /**

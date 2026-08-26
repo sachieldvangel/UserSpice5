@@ -96,6 +96,14 @@ if (isset($settings->totp) && ($settings->totp > 1)) {
 
 }
 
+// An unreadable/broken key file means authenticator codes can never verify.
+// Say that plainly instead of repeating "invalid code" forever; backup codes
+// are hashed rather than encrypted, so they still work as a way in.
+$totpUnavailableMsg = '';
+if ($totpHandler && !$totpHandler->encryptionAvailable()) {
+    $totpUnavailableMsg = 'Two-factor authentication is temporarily unavailable due to a server configuration problem. Please use a backup code or contact the site administrator.';
+}
+
 // Check for pending TOTP verification state
 $awaitingTOTP = false;
 $tempUserId = null;
@@ -148,7 +156,7 @@ if (!empty($_POST)) {
                             $verified = true;
                             // logger($tempUserId, "Login", "TOTP login successful using authenticator app.");
                         } else {
-                            $errors[] = lang("2FA_ERR_INVALID_CODE");
+                            $errors[] = $totpUnavailableMsg ?: lang("2FA_ERR_INVALID_CODE");
                         }
                     }
 
@@ -302,7 +310,7 @@ if (!empty($_POST)) {
                                         'user_agent' => Server::get('HTTP_USER_AGENT')
                                     ]);
                                     unset($_SESSION[$currentSessionName]);
-                                    $errors[] = lang("2FA_ERR_INVALID_CODE");
+                                    $errors[] = $totpUnavailableMsg ?: lang("2FA_ERR_INVALID_CODE");
                                     unset($_SESSION[$currentSessionName . '_totp_user_id_to_verify']);
                                     unset($_SESSION[$currentSessionName . '_totp_remember_me']);
                                     unset($_SESSION[$currentSessionName . '_login_dest']);

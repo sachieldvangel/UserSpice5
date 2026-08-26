@@ -46,6 +46,14 @@ if (isset($settings->totp) && $settings->totp > 0) {
 
     $siteName = isset($settings->site_name) ? $settings->site_name : 'UserSpice';
     $totpHandler = new TOTPHandler($db, $siteName);
+
+    // Enrolling writes an encrypted secret, so a key file PHP cannot read makes
+    // setup fail at the last step. Say so up front rather than after the user
+    // has scanned a QR code. No redirect: totp_verification.php sends people
+    // here when setup is required, and bouncing them back would loop.
+    if (!$totpHandler->encryptionAvailable()) {
+        usError('Two-factor authentication is temporarily unavailable due to a server configuration problem with the encryption key file. Please contact the site administrator.');
+    }
 } else {
     usError(lang("EML_FEATURE_DISABLED"));
     Redirect::to($us_url_root . 'users/account.php');

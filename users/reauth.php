@@ -114,6 +114,15 @@ if (in_array('totp', $methods, true)) {
     $totpHandler = new TOTPHandler($db, $settings->site_name ?: 'UserSpice');
 }
 
+// An unreadable/broken key file means authenticator codes can never verify.
+// Say that plainly instead of repeating "invalid code" forever; backup codes
+// are hashed rather than encrypted, so they still work as a way in.
+$totpUnavailableMsg = '';
+if ($totpHandler && !$totpHandler->encryptionAvailable()) {
+    $totpUnavailableMsg = 'Two-factor authentication is temporarily unavailable due to a server configuration problem. Please use a backup code or contact the site administrator.';
+}
+
+
 // Active OAuth clients, for the social reauth option. The OAuth round-trip
 // (oauth_request.php / oauth_response.php) confirms the returned identity
 // matches this logged-in user — see the reauth branch in oauth_response.php.
@@ -172,7 +181,7 @@ if (!empty($_POST)) {
             } else {
                 $_SESSION[$rk]['fails'] = ++$fails;
                 recordReauth($uid, 'totp', $purpose, 0);
-                $errors[] = lang('2FA_ERR_INVALID_CODE') ?: 'Invalid authentication code.';
+                $errors[] = $totpUnavailableMsg ?: (lang('2FA_ERR_INVALID_CODE') ?: 'Invalid authentication code.');
             }
 
         } elseif ($action === 'email_send' && in_array('email', $methods, true)) {

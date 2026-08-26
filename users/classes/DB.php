@@ -26,7 +26,7 @@ along with this program.  If not, see <http://www.gnu.org/licenses/>.
 //logs to the logs table with the logtype of DATABASE_INSERT or DATABASE_UPDATE
 class DB
 {
-	private static $_instance        = null;
+	private static array $_instances = [];
 	private ?PDO 	$_pdo 			 = null;
 	private         $_query;
 	private bool    $_error          = false;
@@ -132,18 +132,73 @@ class DB
 	}
 
 
+	/**
+	 * The main database connection defined in init.php.
+	 * Always hands back the same shared object.
+	 */
 	public static function getInstance()
 	{
-		if (!isset(self::$_instance)) {
-			self::$_instance = new DB();
-		}
-		return self::$_instance;
+		return self::getShared();
 	}
 
+	/**
+	 * Open a NEW connection using the supplied config.
+	 *
+	 * Every call returns its own object with its own PDO handle, its own result
+	 * set and its own transaction state. Accepts the same config shapes as the
+	 * constructor:
+	 *   DB::getDB('other_db')                   // same creds, different database
+	 *   DB::getDB(['mysql2','init'])            // a named cred set from init.php
+	 *   DB::getDB(['host','db','user','pass'])  // fully explicit
+	 *
+	 * Use getShared() instead when you would rather reuse one connection.
+	 */
 	public static function getDB($config)
 	{
-		self::$_instance = new DB($config);
-		return self::$_instance;
+		return new DB($config);
+	}
+
+	/**
+	 * Like getDB(), but pooled. The first call for a given config opens the
+	 * connection; every later call with the same config gets that SAME object
+	 * back instead of opening another one.
+	 *
+	 *   $db  = DB::getShared();                 // main db (same as getInstance())
+	 *   $db2 = DB::getShared(['mysql2','init']);
+	 *   $db3 = DB::getShared(['mysql2','init']); // $db3 === $db2
+	 *
+	 * Because the object is shared, its results, error state and transaction are
+	 * shared too. Do not call beginTransaction() on a shared connection from two
+	 * places at once - PDO will throw "There is already an active transaction".
+	 * Reach for getDB() when you need an isolated connection.
+	 */
+	public static function getShared($config = [])
+	{
+		$key = is_array($config) ? implode('|', $config) : (string) $config;
+		if (!isset(self::$_instances[$key])) {
+			self::$_instances[$key] = new DB($config);
+		}
+		return self::$_instances[$key];
+	}
+
+	/**
+	 * Forget pooled connections opened by getShared()/getInstance(), so the next
+	 * call opens a fresh one. Pass a config to drop just that connection, or no
+	 * argument to drop them all.
+	 *
+	 * Normal web requests never need this. It exists for long running CLI and
+	 * worker processes, where a pooled handle can sit idle past the MySQL
+	 * wait_timeout and go stale. If you are holding the object rather than
+	 * re-fetching it, call $db->reconnect() on it instead.
+	 */
+	public static function closeShared($config = null): void
+	{
+		if ($config === null) {
+			self::$_instances = [];
+			return;
+		}
+		$key = is_array($config) ? implode('|', $config) : (string) $config;
+		unset(self::$_instances[$key]);
 	}
 
 

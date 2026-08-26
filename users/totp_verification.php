@@ -34,6 +34,15 @@ if($settings->totp > 0 && version_compare(PHP_VERSION, '8.2.0', '>=')) {
 $siteName = isset($settings->site_name) ? $settings->site_name : 'UserSpice';
 $totpHandler = new TOTPHandler($db, $siteName);
 
+// An unreadable/broken key file means authenticator codes can never verify.
+// Say that plainly instead of repeating "invalid code" forever; backup codes
+// are hashed rather than encrypted, so they still work as a way in.
+$totpUnavailableMsg = '';
+if ($totpHandler && !$totpHandler->encryptionAvailable()) {
+    $totpUnavailableMsg = 'Two-factor authentication is temporarily unavailable due to a server configuration problem. Please use a backup code or contact the site administrator.';
+}
+
+
 // Check if user actually has TOTP set up
 if (!$totpHandler->isTOTPEnabled($userId)) {
     // User doesn't have TOTP set up but got here somehow
@@ -102,7 +111,7 @@ if (Server::get('REQUEST_METHOD') === 'POST') {
                     $verified = true;
                     logger($userId, "TOTP_Verification", "Session verified using authenticator app");
                 } else {
-                    $errors[] = lang("2FA_ERR_INVALID_CODE");
+                    $errors[] = $totpUnavailableMsg ?: lang("2FA_ERR_INVALID_CODE");
                     handleAuthFailure('totp_verify', $userId);
                 }
             }

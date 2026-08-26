@@ -48,7 +48,7 @@ $totpKeyWarning = '';
 if (!$totpDisabled) {
   // Check if encryption functions are available
   if (!function_exists('totp_is_crypto_available')) {
-    require_once $abs_us_root . $us_url_root . 'users/includes/encryption.php';
+    require_once $abs_us_root . $us_url_root . 'users/helpers/encryption.php';
   }
 
   if (!totp_is_crypto_available()) {
@@ -62,52 +62,69 @@ if (!$totpDisabled) {
       $settings->totp = 0;
     }
   } else {
-    // Check if key file exists
-    if (!file_exists($totpKeyFile)) {
-      $totpKeyWarning = "<div class='alert alert-warning'>
+    // totp_key_file_status() probes readability before including the file --
+    // a bare require of an unreadable key file is an uncatchable fatal.
+    $totpKeyStatus = totp_key_file_status($totpKeyFile);
+    $totpKeyFix = '';
+    if ($totpKeyStatus['fix'] !== '') {
+      $totpKeyFix = "<br><span class='small'>" . htmlspecialchars($totpKeyStatus['fix']) . "</span>";
+    }
+    if ($totpKeyStatus['command'] !== '') {
+      $totpKeyFix .= "<br><code class='small'>" . htmlspecialchars($totpKeyStatus['command']) . "</code>";
+    }
+
+    switch ($totpKeyStatus['state']) {
+      case 'ok':
+        // Key file exists and loaded - check if the crypto engine is still valid.
+        // A TOTP_FORCE_CRYPTO_ENGINE pointing at a missing extension throws here.
+        try {
+          $currentEngine = totp_get_active_crypto_engine();
+        } catch (Throwable $e) {
+          $totpKeyWarning = "<div class='alert alert-danger'>
+                        <strong>TOTP Engine Error:</strong> " . htmlspecialchars($e->getMessage()) . "
+                    </div>";
+          break;
+        }
+        $storedEngine = defined('TOTP_CRYPTO_ENGINE') ? TOTP_CRYPTO_ENGINE : 'unknown';
+
+        if (defined('TOTP_FORCE_CRYPTO_ENGINE')) {
+          $forcedEngine = TOTP_FORCE_CRYPTO_ENGINE;
+          if ($currentEngine !== $forcedEngine) {
+            $totpKeyWarning = "<div class='alert alert-warning'>
+                            <strong>TOTP Engine Override:</strong> You have forced crypto engine to '<strong>$forcedEngine</strong>' 
+                            but the available engine is '<strong>$currentEngine</strong>'. This may cause encryption/decryption failures.
+                        </div>";
+          }
+        } elseif ($currentEngine !== $storedEngine && $storedEngine !== 'unknown') {
+          $totpKeyWarning = "<div class='alert alert-info'>
+                        <strong>TOTP Engine Changed:</strong> Your key file was created with '<strong>$storedEngine</strong>' 
+                        but the current engine is '<strong>$currentEngine</strong>'. Existing secrets will be automatically 
+                        re-encrypted when accessed.
+                    </div>";
+        }
+
+        $totpEncryptionValid = true;
+        break;
+
+      case 'missing':
+        $totpKeyWarning = "<div class='alert alert-warning'>
                 <strong>TOTP Key Missing:</strong> The encryption key file <code>usersc/includes/totp_key.php</code> does not exist. 
                 It will be automatically generated when TOTP is first enabled, but you may want to generate it now for testing. 
                 Make sure your <code>usersc/includes/</code> directory is writable.
             </div>";
-    } else {
-      // Key file exists, check if it's valid
-      try {
-        // Load the key file
-        require_once $totpKeyFile;
+        break;
 
-        if (!defined('TOTP_ENC_KEY')) {
-          $totpKeyWarning = "<div class='alert alert-danger'>
-                        <strong>Invalid TOTP Key File:</strong> The key file exists but TOTP_ENC_KEY is not defined. 
-                        You may need to delete <code>usersc/includes/totp_key.php</code> and let it regenerate.
-                    </div>";
-        } else {
-          // Check if the crypto engine is still valid
-          $currentEngine = totp_get_active_crypto_engine();
-          $storedEngine = defined('TOTP_CRYPTO_ENGINE') ? TOTP_CRYPTO_ENGINE : 'unknown';
-
-          if (defined('TOTP_FORCE_CRYPTO_ENGINE')) {
-            $forcedEngine = TOTP_FORCE_CRYPTO_ENGINE;
-            if ($currentEngine !== $forcedEngine) {
-              $totpKeyWarning = "<div class='alert alert-warning'>
-                                <strong>TOTP Engine Override:</strong> You have forced crypto engine to '<strong>$forcedEngine</strong>' 
-                                but the available engine is '<strong>$currentEngine</strong>'. This may cause encryption/decryption failures.
-                            </div>";
-            }
-          } elseif ($currentEngine !== $storedEngine && $storedEngine !== 'unknown') {
-            $totpKeyWarning = "<div class='alert alert-info'>
-                            <strong>TOTP Engine Changed:</strong> Your key file was created with '<strong>$storedEngine</strong>' 
-                            but the current engine is '<strong>$currentEngine</strong>'. Existing secrets will be automatically 
-                            re-encrypted when accessed.
-                        </div>";
-          }
-
-          $totpEncryptionValid = true;
-        }
-      } catch (Exception $e) {
+      case 'unreadable':
         $totpKeyWarning = "<div class='alert alert-danger'>
-                    <strong>TOTP Key Error:</strong> Error loading key file: " . htmlspecialchars($e->getMessage()) . "
-                </div>";
-      }
+                <strong>TOTP Key File Unreadable:</strong> " . htmlspecialchars($totpKeyStatus['message']) . $totpKeyFix . "
+            </div>";
+        break;
+
+      default: // 'invalid' and 'error'
+        $totpKeyWarning = "<div class='alert alert-danger'>
+                <strong>TOTP Key Error:</strong> " . htmlspecialchars($totpKeyStatus['message']) . $totpKeyFix . "
+            </div>";
+        break;
     }
 
     // Final check - if TOTP is enabled but we don't have valid encryption

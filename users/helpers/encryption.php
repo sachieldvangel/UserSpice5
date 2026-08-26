@@ -56,49 +56,240 @@ function totp_is_crypto_available(): bool
  * ------------------------------------------------------------------ */
 
 /**
+ * Ownership / permission facts about the key file, for diagnostics.
+ *
+ * Every lookup is best-effort: posix_* is not compiled into every PHP build
+ * and open_basedir can hide stat() results, so each value stays null when we
+ * cannot determine it honestly.
+ *
+ * @return array{perms:?string,owner:?string,group:?string,runas_user:?string,runas_group:?string}
+ */
+function totp_key_file_owner_info(string $totpKeyFile): array
+{
+    $info = [
+        'perms'       => null,
+        'owner'       => null,
+        'group'       => null,
+        'runas_user'  => null,
+        'runas_group' => null,
+    ];
+
+    $perms = @fileperms($totpKeyFile);
+    if ($perms !== false) {
+        $info['perms'] = substr(sprintf('%o', $perms), -4);
+    }
+
+    $uid = @fileowner($totpKeyFile);
+    if ($uid !== false) {
+        $info['owner'] = (string) $uid;
+        if (function_exists('posix_getpwuid')) {
+            $pw = @posix_getpwuid($uid);
+            if (is_array($pw) && !empty($pw['name'])) {
+                $info['owner'] = $pw['name'];
+            }
+        }
+    }
+
+    $gid = @filegroup($totpKeyFile);
+    if ($gid !== false) {
+        $info['group'] = (string) $gid;
+        if (function_exists('posix_getgrgid')) {
+            $gr = @posix_getgrgid($gid);
+            if (is_array($gr) && !empty($gr['name'])) {
+                $info['group'] = $gr['name'];
+            }
+        }
+    }
+
+    /* Who PHP actually runs as. get_current_user() is deliberately not used as
+       a fallback -- it reports the owner of the script file, not the process. */
+    if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+        $me = @posix_getpwuid(posix_geteuid());
+        if (is_array($me)) {
+            if (!empty($me['name'])) {
+                $info['runas_user'] = $me['name'];
+            }
+            if (isset($me['gid']) && function_exists('posix_getgrgid')) {
+                $gr = @posix_getgrgid((int) $me['gid']);
+                if (is_array($gr) && !empty($gr['name'])) {
+                    $info['runas_group'] = $gr['name'];
+                }
+            }
+        }
+    }
+
+    return $info;
+}
+
+/** One-line "permissions are 0400, owner is sachiel:sachiel, PHP runs as www-data". */
+function totp_key_file_diagnostics(string $totpKeyFile): string
+{
+    $info = totp_key_file_owner_info($totpKeyFile);
+    $bits = [];
+
+    if ($info['perms'] !== null) {
+        $bits[] = 'permissions are ' . $info['perms'];
+    }
+    if ($info['owner'] !== null && $info['group'] !== null) {
+        $bits[] = 'owner is ' . $info['owner'] . ':' . $info['group'];
+    }
+    if ($info['runas_user'] !== null) {
+        $bits[] = 'PHP is running as ' . $info['runas_user'];
+    }
+
+    return $bits ? implode(', ', $bits) : '';
+}
+
+/** The chgrp/chmod a site owner should run to hand the key file to PHP. */
+function totp_key_file_fix_command(string $totpKeyFile): string
+{
+    $info  = totp_key_file_owner_info($totpKeyFile);
+    $group = $info['runas_group'] ?: ($info['runas_user'] ?: 'www-data');
+
+    return 'chgrp ' . $group . ' ' . $totpKeyFile . ' && chmod 440 ' . $totpKeyFile;
+}
+
+/**
+ * Inspect -- and optionally load -- the key file without ever being fatal.
+ *
+ * require/include of an unreadable file is a fatal E_COMPILE_ERROR that no
+ * try/catch can trap, so readability is probed with is_readable() *before*
+ * the file is pulled in. Callers get a state they can report instead of a
+ * white screen.
+ *
+ * States:
+ *   'ok'         key is loaded and TOTP_ENC_KEY is defined
+ *   'missing'    nothing at that path (safe to generate one)
+ *   'unreadable' file is there but the web server cannot read it
+ *   'error'      the file threw or failed to parse while being included
+ *   'invalid'    the file loaded but never defined TOTP_ENC_KEY
+ *
+ * @param bool $load Pass false to probe without including the file.
+ * @return array{state:string,message:string,fix:string,command:string}
+ */
+function totp_key_file_status(string $totpKeyFile, bool $load = true): array
+{
+    $status = static function (string $state, string $message, string $fix = '', string $command = ''): array {
+        return ['state' => $state, 'message' => $message, 'fix' => $fix, 'command' => $command];
+    };
+
+    /* Already loaded this request, or defined in init.php / a .env loader. */
+    if (defined('TOTP_ENC_KEY')) {
+        return $status('ok', 'The TOTP encryption key is loaded.');
+    }
+
+    if (!file_exists($totpKeyFile)) {
+        return $status(
+            'missing',
+            'The TOTP key file does not exist yet.',
+            'It is generated automatically the first time TOTP is enabled, as long as '
+                . dirname($totpKeyFile) . ' is writable by PHP.'
+        );
+    }
+
+    if (!is_readable($totpKeyFile)) {
+        $diag = totp_key_file_diagnostics($totpKeyFile);
+
+        return $status(
+            'unreadable',
+            'The TOTP key file exists but the web server cannot read it'
+                . ($diag !== '' ? ' (' . $diag . ')' : '') . '.',
+            'Give the user or group PHP runs as read access. Do not delete the file: '
+                . 'the TOTP secrets already stored in your database can only be decrypted with this key.',
+            totp_key_file_fix_command($totpKeyFile)
+        );
+    }
+
+    if (!$load) {
+        return $status('ok', 'The TOTP key file is present and readable.');
+    }
+
+    try {
+        require_once $totpKeyFile;
+    } catch (Throwable $e) {
+        return $status(
+            'error',
+            'The TOTP key file could not be loaded: ' . $e->getMessage(),
+            'The file is readable but broken. Restore it from your backup -- the secrets '
+                . 'already stored in your database can only be decrypted with the original key.'
+        );
+    }
+
+    if (!defined('TOTP_ENC_KEY')) {
+        return $status(
+            'invalid',
+            'The TOTP key file loaded but does not define TOTP_ENC_KEY.',
+            'Restore the file from your backup if you have one. Deleting it lets UserSpice '
+                . 'generate a fresh key, but every existing TOTP secret becomes undecryptable '
+                . 'and those users must re-enroll.'
+        );
+    }
+
+    return $status('ok', 'The TOTP encryption key is loaded.');
+}
+
+/**
  * Initialise encryption; generate/load key file; validate engine.
  *
  * @param string $totpKeyFile  Absolute path to usersc/includes/totp_key.php
  * @param bool   $migration    True during core migrations (non-fatal mode)
+ *
+ * @throws RuntimeException when the key cannot be established (never fatal --
+ *         callers can catch this and degrade instead of white-screening).
  */
 function totp_init_encryption(string $totpKeyFile, bool $migration = false): void
 {
     if (!defined('TOTP_ENC_KEY')) {
 
-        if (file_exists($totpKeyFile)) {
-            // ► Load existing key
-            require_once $totpKeyFile;
+        $status = totp_key_file_status($totpKeyFile);
 
-            // ► Warn if engine changed
-            if (
-                defined('TOTP_CRYPTO_ENGINE')
-                && TOTP_CRYPTO_ENGINE !== totp_crypto_engine()
-            ) {
-                $old = TOTP_CRYPTO_ENGINE;
-                $new = totp_crypto_engine();
+        if ($status['state'] === 'missing') {
+            // ► Autogenerate key file
+            totp_generate_key_file($totpKeyFile);
 
-                if ($new === null) {
-                    throw new RuntimeException(
-                        "TOTP crypto engine '$old' no longer available; install missing extension."
-                    );
-                }
+        } elseif ($status['state'] !== 'ok') {
+            /* Never regenerate here. A file we cannot read or parse may still
+               hold the only key that decrypts the secrets in the database. */
+            $detail = trim($status['message'] . ' ' . $status['fix']);
+            if ($status['command'] !== '') {
+                $detail .= ' Try: ' . $status['command'];
+            }
+            error_log('TOTP: ' . $detail);
 
-                error_log(
-                    "TOTP NOTICE: crypto engine changed from '$old' to '$new'. " .
-                    "Old secrets will be re-encrypted on first use."
+            if ($migration) {
+                return; // migrations stay non-fatal
+            }
+            throw new RuntimeException($detail);
+        }
+
+        // ► Warn if engine changed
+        if (
+            defined('TOTP_CRYPTO_ENGINE')
+            && TOTP_CRYPTO_ENGINE !== totp_crypto_engine()
+        ) {
+            $old = TOTP_CRYPTO_ENGINE;
+            $new = totp_crypto_engine();
+
+            if ($new === null) {
+                throw new RuntimeException(
+                    "TOTP crypto engine '$old' no longer available; install missing extension."
                 );
             }
 
-        } else {
-            // ► Autogenerate key file
-            totp_generate_key_file($totpKeyFile);
+            error_log(
+                "TOTP NOTICE: crypto engine changed from '$old' to '$new'. " .
+                "Old secrets will be re-encrypted on first use."
+            );
         }
     }
 
     /* Final validation (skip during non-interactive migrations) */
     if (!$migration) {
         if (!defined('TOTP_ENC_KEY')) {
-            throw new RuntimeException('TOTP_ENC_KEY not defined after init');
+            throw new RuntimeException(
+                'TOTP_ENC_KEY is not defined after init. The key file at ' . $totpKeyFile
+                . ' could not be created -- check that ' . dirname($totpKeyFile) . ' is writable by PHP.'
+            );
         }
         if (!totp_is_crypto_available()) {
             throw new RuntimeException('No crypto backend available for TOTP');

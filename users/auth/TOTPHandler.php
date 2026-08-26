@@ -8,6 +8,7 @@ class TOTPHandler
     private $db;
     private $google2fa;
     private $companyName;
+    private $encryptionError = null;
 
     public function __construct($db, $companyName = 'UserSpice')
     {
@@ -18,10 +19,31 @@ class TOTPHandler
         $this->google2fa = new Google2FA();
         $this->companyName = $companyName;
         
-        // Ensure encryption is initialized
+        // Ensure encryption is initialized. A key file we cannot read must not
+        // take the whole page down -- record the problem instead. The methods
+        // that never touch the key (isTOTPEnabled, backup codes) keep working,
+        // and the ones that do need it fail closed: getUserSecret() returns
+        // null, so a code can never verify against a key we could not load.
         global $abs_us_root, $us_url_root;
         $totpKeyFile = $abs_us_root . $us_url_root . 'usersc/includes/totp_key.php';
-        totp_init_encryption($totpKeyFile);
+        try {
+            totp_init_encryption($totpKeyFile);
+        } catch (Throwable $e) {
+            $this->encryptionError = $e->getMessage();
+            error_log('TOTP unavailable: ' . $e->getMessage());
+        }
+    }
+
+    /** False when the encryption key could not be loaded this request. */
+    public function encryptionAvailable(): bool
+    {
+        return $this->encryptionError === null;
+    }
+
+    /** Why encryption is unavailable, or null when it is fine. */
+    public function encryptionError(): ?string
+    {
+        return $this->encryptionError;
     }
 
     public function generateSecret(): string

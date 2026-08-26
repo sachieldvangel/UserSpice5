@@ -257,7 +257,7 @@ function writeRpidToInit(string $rpid): bool
 
 // TOTP Configuration Checks
 if (!function_exists('totp_is_crypto_available')) {
-    require_once $abs_us_root . $us_url_root . 'users/includes/encryption.php';
+    require_once $abs_us_root . $us_url_root . 'users/helpers/encryption.php';
 }
 
 $min_totp_php_version = '8.2.0';
@@ -282,26 +282,40 @@ if (!$crypto_ok && $phpver_ok) {
 $key_file_exists = file_exists($totpKeyFile);
 $key_dir_writable = is_writable(dirname($totpKeyFile));
 $key_valid = false;
+$key_readable = true;
 $key_engine_info = '';
 
 if ($key_file_exists) {
-    try {
-        @include $totpKeyFile;
-        if (defined('TOTP_ENC_KEY')) {
-            $key_valid = true;
+    // totp_key_file_status() checks readability before including the file, so a
+    // permissions problem is reported as such instead of fataling (a bare
+    // include of an unreadable file is an uncatchable E_COMPILE_ERROR) or being
+    // silently mislabelled "invalid" by an @-suppressed include.
+    $key_status = totp_key_file_status($totpKeyFile);
+    $key_readable = ($key_status['state'] !== 'unreadable');
+
+    if ($key_status['state'] === 'ok') {
+        $key_valid = true;
+        try {
             $currentEngine = totp_get_active_crypto_engine();
             $storedEngine = defined('TOTP_CRYPTO_ENGINE') ? TOTP_CRYPTO_ENGINE : 'unknown';
             $key_engine_info = "Key created with '{$storedEngine}'. Current server engine is '{$currentEngine}'.";
             if ($currentEngine !== $storedEngine && $storedEngine !== 'unknown') {
                 $totp_status['messages'][] = ['text' => "Your server's crypto engine has changed. Existing TOTP secrets will be automatically re-encrypted on next use.", 'level' => 'info'];
             }
-        } else {
+        } catch (Throwable $e) {
             $totp_status['level'] = 'danger';
-            $totp_status['messages'][] = "The key file <code>usersc/includes/totp_key.php</code> is invalid because it does not define <code>TOTP_ENC_KEY</code>. Please delete it and generate a new one.";
+            $totp_status['messages'][] = "Crypto engine error: " . htmlspecialchars($e->getMessage());
         }
-    } catch (Exception $e) {
+    } else {
         $totp_status['level'] = 'danger';
-        $totp_status['messages'][] = "Error loading key file: " . htmlspecialchars($e->getMessage());
+        $detail = htmlspecialchars($key_status['message']);
+        if ($key_status['fix'] !== '') {
+            $detail .= '<br>' . htmlspecialchars($key_status['fix']);
+        }
+        if ($key_status['command'] !== '') {
+            $detail .= '<br><code>' . htmlspecialchars($key_status['command']) . '</code>';
+        }
+        $totp_status['messages'][] = $detail;
     }
 } else {
     if ($settings->totp > 0) {
@@ -2209,6 +2223,8 @@ if ($deprecated_files_present) {
                         Encryption Key File
                         <?php if ($key_file_exists && $key_valid) : ?>
                             <span class="badge bg-success"><i class="fas fa-check me-1"></i>Found & Valid</span>
+                        <?php elseif ($key_file_exists && !$key_readable) : ?>
+                            <span class="badge bg-danger"><i class="fas fa-lock me-1"></i>Unreadable</span>
                         <?php elseif ($key_file_exists && !$key_valid) : ?>
                             <span class="badge bg-danger"><i class="fas fa-times me-1"></i>Invalid</span>
                         <?php else : ?>
